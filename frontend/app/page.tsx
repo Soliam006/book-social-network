@@ -5,21 +5,27 @@ import { Bell, Search, User, Book, ChevronLeft, ChevronRight } from 'lucide-reac
 import NavbarBooks from "@/components/NavBarBooks";
 
 // Función para obtener libros reales desde Google Books API
+import axios from 'axios'
+
 const fetchBooks = async (category: string) => {
   const response = await fetch(
     `https://www.googleapis.com/books/v1/volumes?q=subject:${category}&maxResults=10`
   )
   const data = await response.json()
-  return data.items ? data.items.map((item: any) => ({
+
+  const books = data.items ? data.items.map((item: any) => ({
     id: item.id,
     title: item.volumeInfo.title,
     authors: item.volumeInfo.authors || ['Unknown Author'],
+    description: item.volumeInfo.description,
     imageLinks: {
-      thumbnail: item.volumeInfo.imageLinks
-        ? item.volumeInfo.imageLinks.thumbnail.replace('http://', 'https://') // Asegurar HTTPS
-        : '/placeholder.svg'
+      thumbnail: item.volumeInfo.imageLinks?.thumbnail?.replace('http://', 'https://') ||
+                 item.volumeInfo.imageLinks?.smallThumbnail?.replace('http://', 'https://') ||
+                 '/placeholder.svg',
     }
   })) : []
+
+  return books
 }
 
 interface ButtonProps {
@@ -86,40 +92,49 @@ interface Book {
   id: string
   title: string
   authors: string[]
+  description: string
   imageLinks: {
     thumbnail: string
+    smallThumbnail: string
+    extraLarge: string
+    large: string
+    medium: string
+
   }
 }
 
 interface BookCarouselProps {
   books: Book[]
+  onSelectBook: (book: Book) => void // Añadimos la función para seleccionar un libro
 }
 
 // Componente BookCarousel
-const BookCarousel: React.FC<BookCarouselProps> = ({ books }) => {
+const BookCarousel: React.FC<BookCarouselProps> = ({ books, onSelectBook }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   const scrollLeft = () => {
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollBy({ left: -300, behavior: 'smooth' })
+      scrollContainerRef.current.scrollBy({ left: -600, behavior: 'smooth' })
     }
   }
 
   const scrollRight = () => {
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollBy({ left: 300, behavior: 'smooth' })
+      scrollContainerRef.current.scrollBy({ left: 600, behavior: 'smooth' })
     }
   }
 
   return (
     <ScrollArea scrollContainerRef={scrollContainerRef} onScrollLeft={scrollLeft} onScrollRight={scrollRight}>
       {books.map((book) => (
-        <div key={book.id} className="w-[150px] shrink-0">
+        <div key={book.id} className="pt-4 hover:scale-105 lg:w-[180px] md:w-[120px] w-[90px] shrink-0" onClick={() => onSelectBook(book)}> {/* onClick para seleccionar libro */}
           <div className="relative aspect-[2/3] overflow-hidden rounded-md">
             <img
               src={book.imageLinks.thumbnail}
               alt={book.title}
-              className="object-cover w-full h-full transition-transform duration-300 hover:scale-105"
+              width={1000}
+              height={1000}
+              className="object-cover w-full h-full transition-transform duration-700"
             />
             {book.authors.length > 1 && (
               <div className="absolute top-2 right-2 bg-blue-500 text-white rounded-full p-1">
@@ -130,48 +145,101 @@ const BookCarousel: React.FC<BookCarouselProps> = ({ books }) => {
               </div>
             )}
           </div>
-          <h3 className="mt-2 text-sm font-medium leading-tight text-white">{book.title}</h3>
-          <p className="text-xs text-gray-400">{book.authors[0]}</p>
+          <h3 className="pt-2 mt-2 text-sm font-medium leading-tight text-white">{book.title}</h3>
+          <p className="pt-2 text-xs text-gray-400">{book.authors[0]}</p>
         </div>
       ))}
     </ScrollArea>
   )
 }
 
-// Componente HomePage con integración de Google Books API
+const SelectedBook: React.FC<{ book: Book }> = ({ book }) => {
+  const [showFullDescription, setShowFullDescription] = useState(false);
+  const maxDescriptionLength = 300;
+
+  const toggleDescription = () => {
+    setShowFullDescription(!showFullDescription);
+  };
+
+  const truncatedDescription = book.description && book.description.length > maxDescriptionLength
+    ? `${book.description.slice(0, maxDescriptionLength)}...`
+    : book.description;
+
+  return (
+    <div className="sticky top-0 h-screen p-4 bg-gray-800 rounded-lg overflow-y-auto"> {/* sticky y h-screen */}
+      <div className="flex flex-col items-center">
+        <h2 className="text-2xl lg:text-4xl font-bold mb-4 text-center">{book.title}</h2>
+        <p className="lg:text-xl text-gray-300 mb-2">Autor(es): {book.authors.join(', ')}</p>
+        <img
+            src={book.imageLinks.thumbnail}
+            alt={book.title}
+            className="rounded-md mb-4 max-w-xs"
+        />
+        <p className="text-gray-300">
+          {showFullDescription ? book.description : truncatedDescription}
+        </p>
+        {book.description && book.description.length > maxDescriptionLength && (
+            <button
+                className="text-blue-500 mt-2 hover:underline"
+                onClick={toggleDescription}
+            >
+              {showFullDescription ? 'Ver menos' : 'Ver más'}
+            </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+// Página principal
 export default function HomePage() {
-  const [booksByCategory, setBooksByCategory] = useState<any[]>([])
+  const [booksByCategory, setBooksByCategory] = useState<any[]>([]);
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
 
   useEffect(() => {
-    // Cargar libros de todas las categorías
     const loadBooks = async () => {
       const booksData = await Promise.all(
         categories.map(async (category) => {
-          const books = await fetchBooks(category)
-          return { category, books }
+          const books = await fetchBooks(category);
+          return { category, books };
         })
-      )
-      setBooksByCategory(booksData)
-    }
+      );
+      setBooksByCategory(booksData);
+      if (booksData.length > 0 && booksData[0].books.length > 0) {
+        setSelectedBook(booksData[0].books[0]); // Seleccionar el primer libro de la primera categoría
+      }
+    };
 
-    loadBooks()
-  }, [])
+    loadBooks();
+  }, []);
 
   return (
-    <div className="bg-gray-900 min-h-screen text-white">
-      <NavbarBooks />
+      <div>
+        <NavbarBooks/>
+        <div className="bg-gray-900 min-h-screen text-white flex "> {/* Añadimos flex al main contenedor */}
 
-      <main className="p-8 mt-12 md:mt-0">
-        <h2 className="text-3xl font-bold mb-6">Explora por Categoría</h2>
-        <div className="space-y-8 ">
-          {booksByCategory.map(({ category, books }) => (
-            <section key={category} className="space-y-4">
-              <h3 className="text-2xl font-semibold">{category}</h3>
-              <BookCarousel books={books} />
-            </section>
-          ))}
+          {/* Columna fija para el libro seleccionado */}
+          <div className="hidden md:block md:w-2/4 lg:w-2/5 p-4 pt-20 ">
+            {selectedBook && <SelectedBook book={selectedBook}/>}
+          </div>
+
+          {/* Columna desplazable para el contenido (carrusel y categorías) */}
+          <div
+              className="pt-20 w-full md:w-2/4 lg:w-4/5 p-4 overflow-y-auto h-screen"> {/* Añadimos overflow-y-auto y h-screen */}
+            <h2 className="text-3xl font-bold mb-6">Explora por Categoría</h2>
+            <div className="space-y-8">
+              {booksByCategory.map(({category, books}) => (
+                  <section key={category} className="space-y-4">
+                    <h3 className="text-2xl font-semibold">{category}</h3>
+                    <BookCarousel books={books} onSelectBook={setSelectedBook}/> {/* Pasar la función de selección */}
+                  </section>
+              ))}
+            </div>
+          </div>
         </div>
-      </main>
-    </div>
-  )
+
+      </div>
+
+  );
 }
